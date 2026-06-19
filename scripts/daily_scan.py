@@ -47,7 +47,18 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger("daily_scan")
 
 API = "https://finnhub.io/api/v1"
+AV = "https://www.alphavantage.co/query"
 KEY = os.getenv("FINNHUB_API_KEY")
+AV_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
+
+# Fallback liquid large-cap universe if Alpha Vantage is unavailable/rate-limited.
+DEFAULT_LIQUID_UNIVERSE = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "V", "MA",
+    "UNH", "HD", "PG", "JNJ", "XOM", "CVX", "KO", "PEP", "COST", "WMT",
+    "BAC", "ABBV", "MRK", "AVGO", "ORCL", "CRM", "ADBE", "NFLX", "AMD", "INTC",
+    "CSCO", "QCOM", "TXN", "DIS", "NKE", "MCD", "LLY", "PFE", "VZ", "WFC",
+    "GS", "MS", "CAT", "BA", "HON",
+]
 
 SCAN_LIMIT = int(os.getenv("SCAN_LIMIT", "25"))
 CONGRESS_TOP = int(os.getenv("CONGRESS_TOP", "8"))
@@ -91,31 +102,65 @@ def fh_get(path: str, **params):
 # --------------------------------------------------------------------------- #
 # Universe
 # --------------------------------------------------------------------------- #
+def _av_candidate_pool() -> list[str]:
+    """Liquid, dynamic candidate pool from Alpha Vantage TOP_GAINERS_LOSERS.
+
+    Combines most-actively-traded + top gainers + top losers (in that order of
+    priority) into a deduped list of real, liquid tickers refreshed daily.
+    """
+    if not AV_KEY:
+        log.warning("ALPHAVANTAGE_API_KEY not set; cannot build dynamic pool")
+        return []
+    try:
+        r = HTTP.get(
+            AV,
+            params={"function": "TOP_GAINERS_LOSERS", "apikey": AV_KEY},
+            timeout=HTTP_TIMEOUT,
+        )
+        r.raise_for_status()
+        j = r.json()
+    except requests.RequestException as e:
+        log.warning("Alpha Vantage pool request failed: %s", e)
+        return []
+    finally:
+        time.sleep(RATE_SLEEP)
+
+    if "most_actively_traded" not in j and "top_gainers" not in j:
+        log.warning("Alpha Vantage unexpected response: %s", j)
+        return []
+
+    pool: list[str] = []
+    seen: set[str] = set()
+    # Most-actively-traded first (most liquid), then the day's biggest movers.
+    for bucket in ("most_actively_traded", "top_gainers", "top_losers"):
+        for item in j.get(bucket, []):
+            t = (item.get("ticker") or "").upper()
+            if t and t.isalpha() and len(t) <= 5 and t not in seen:
+                seen.add(t)
+                pool.append(t)
+    return pool
+
+
 def build_universe() -> list[str]:
-    """Dynamic US common-stock universe, with a day-rotating window."""
+    """Dynamic, liquid candidate universe for the value screen.
+
+    Priority: WATCHLIST override -> Alpha Vantage liquid pool -> curated
+    large-cap fallback. Bounded to SCAN_LIMIT to respect Finnhub rate limits.
+    """
     override = os.getenv("WATCHLIST", "").strip()
     if override:
         syms = [s.strip().upper() for s in override.split(",") if s.strip()]
         log.info("Using WATCHLIST override: %d symbols", len(syms))
         return syms[:SCAN_LIMIT]
 
-    data = fh_get("/stock/symbol", exchange="US") or []
-    universe = [
-        d["symbol"]
-        for d in data
-        if d.get("type") == "Common Stock" and d.get("symbol", "").isalpha()
-    ]
-    universe.sort()
-    if not universe:
-        log.warning("Empty universe from API")
-        return []
+    pool = _av_candidate_pool()
+    if pool:
+        log.info("Dynamic Alpha Vantage pool: %d liquid candidates", len(pool))
+    else:
+        pool = DEFAULT_LIQUID_UNIVERSE
+        log.warning("Falling back to curated large-cap universe (%d names)", len(pool))
 
-    # Rotate the scan window by day-of-year so coverage changes daily.
-    day = datetime.now(timezone.utc).timetuple().tm_yday
-    start = (day * SCAN_LIMIT) % len(universe)
-    window = (universe + universe)[start : start + SCAN_LIMIT]
-    log.info("Universe=%d, scanning window of %d from offset %d", len(universe), len(window), start)
-    return window
+    return pool[:SCAN_LIMIT]
 
 
 # --------------------------------------------------------------------------- #

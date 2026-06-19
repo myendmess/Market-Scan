@@ -1,61 +1,76 @@
 #!/usr/bin/env python3
-"""Daily market & news digest.
+"""Daily market digest — dynamic top movers + news.
 
-Fetches spot quotes (Finnhub), market headlines (Finnhub), and tech/market
-news (NewsAPI, with a keyless RSS fallback), then writes a Markdown digest to
-``digest.md``.
+Sections:
+- Top 10 stock gainers / losers (Alpha Vantage TOP_GAINERS_LOSERS, whole market)
+- Top 10 ETF gainers / losers (computed live from Finnhub quotes over a curated
+  liquid-ETF universe — there is no free market-wide ETF movers endpoint)
+- Market headlines (Finnhub)
+- Tech & earnings (NewsAPI, with a keyless RSS fallback)
 
-Design goals:
-- Never hard-crash CI on partial data. Each source degrades gracefully and the
-  digest is written with whatever was collected.
-- Works locally (loads ``.env``) and in GitHub Actions (env vars / secrets).
+Writes the Markdown digest to ``digest.md``. Degrades gracefully: a missing key
+or failed source yields a partial digest rather than a hard failure.
 
 Env vars:
-- FINNHUB_API_KEY  required for quotes + Finnhub news
-- NEWSAPI_KEY      optional; if missing, falls back to free RSS feeds
-- SYMBOLS          optional; comma-separated tickers (e.g. "AAPL,MSFT,NVDA")
+  FINNHUB_API_KEY        required for ETF movers + market news
+  ALPHAVANTAGE_API_KEY   required for stock movers
+  NEWSAPI_KEY            optional; falls back to RSS if absent
+  ETF_UNIVERSE           optional comma list overriding the default ETF universe
+  RATE_SLEEP             seconds between Finnhub calls (default 1.1; free=60/min)
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# Load .env when running locally; harmless if the file/package is absent (CI).
 try:
     from dotenv import load_dotenv
 
     load_dotenv()
-except Exception:  # pragma: no cover - dotenv is optional at runtime
+except Exception:  # pragma: no cover - optional locally, absent in CI is fine
     pass
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger("market_digest")
 
 FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
+AV_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 
-DEFAULT_SYMBOLS = ["AAPL", "GOOGL", "MSFT"]
-HTTP_TIMEOUT = 15  # seconds
+FINNHUB = "https://finnhub.io/api/v1"
+AV = "https://www.alphavantage.co/query"
+HTTP_TIMEOUT = 20
+RATE_SLEEP = float(os.getenv("RATE_SLEEP", "1.1"))
+
+# Curated liquid ETF universe — movers are computed live each run. There is no
+# free market-wide ETF-movers endpoint, so the universe is curated, not the data.
+DEFAULT_ETF_UNIVERSE = [
+    "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "VEA", "VWO", "EFA", "EEM",
+    "AGG", "BND", "TLT", "IEF", "LQD", "HYG", "GLD", "SLV", "USO", "VIXY",
+    "XLE", "XLF", "XLK", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE",
+    "XLC", "SMH", "SOXX", "ARKK", "XBI", "IBB", "KRE", "XOP", "GDX", "VNQ",
+    "EWJ", "FXI", "INDA", "EWZ", "KWEB", "DBC", "TQQQ", "SQQQ",
+]
 
 # Free, no-auth finance feeds used when NewsAPI is unavailable.
 RSS_FEEDS = [
-    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",          # WSJ Markets
-    "https://feeds.content.dowjones.io/public/rss/mw_topstories",  # MarketWatch
+    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+    "https://feeds.content.dowjones.io/public/rss/mw_topstories",
 ]
 
 
 def _session() -> requests.Session:
-    """A requests session with sane retries/backoff for flaky free tiers."""
     s = requests.Session()
     retry = Retry(
         total=3,
-        backoff_factor=0.5,
+        backoff_factor=1.0,
         status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=frozenset({"GET"}),
     )
@@ -66,46 +81,108 @@ def _session() -> requests.Session:
 HTTP = _session()
 
 
-def _symbols() -> list[str]:
-    raw = os.getenv("SYMBOLS", "").strip()
-    if raw:
-        return [s.strip().upper() for s in raw.split(",") if s.strip()]
-    return DEFAULT_SYMBOLS
+def _to_float(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
-def get_market_data(symbols: list[str]) -> dict[str, dict]:
-    """Finnhub quote endpoint: current price + % change per symbol."""
+def _pct(v):
+    """Parse Alpha Vantage's '68.42%' -> 68.42."""
+    if isinstance(v, str):
+        return _to_float(v.strip().rstrip("%"))
+    return _to_float(v)
+
+
+# --------------------------------------------------------------------------- #
+# Stock movers (Alpha Vantage)
+# --------------------------------------------------------------------------- #
+def get_stock_movers(limit: int = 10) -> dict[str, list[dict]]:
+    empty = {"gainers": [], "losers": []}
+    if not AV_KEY:
+        log.warning("ALPHAVANTAGE_API_KEY not set; skipping stock movers")
+        return empty
+    try:
+        r = HTTP.get(
+            AV,
+            params={"function": "TOP_GAINERS_LOSERS", "apikey": AV_KEY},
+            timeout=HTTP_TIMEOUT,
+        )
+        r.raise_for_status()
+        j = r.json()
+    except requests.RequestException as e:
+        log.warning("Alpha Vantage request failed: %s", e)
+        return empty
+
+    if "top_gainers" not in j:
+        # Rate-limit / invalid key responses come back as {"Information": ...}.
+        log.warning("Alpha Vantage unexpected response: %s", j)
+        return empty
+
+    def row(x):
+        return {
+            "ticker": x.get("ticker"),
+            "price": _to_float(x.get("price")),
+            "change_pct": _pct(x.get("change_percentage")),
+            "volume": x.get("volume"),
+        }
+
+    return {
+        "gainers": [row(x) for x in j.get("top_gainers", [])[:limit]],
+        "losers": [row(x) for x in j.get("top_losers", [])[:limit]],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# ETF movers (Finnhub quotes over curated universe)
+# --------------------------------------------------------------------------- #
+def get_etf_movers(limit: int = 10) -> dict[str, list[dict]]:
+    empty = {"gainers": [], "losers": []}
     if not FINNHUB_KEY:
-        log.warning("FINNHUB_API_KEY not set; skipping market quotes")
-        return {}
+        log.warning("FINNHUB_API_KEY not set; skipping ETF movers")
+        return empty
 
-    base = "https://finnhub.io/api/v1/quote"
-    out: dict[str, dict] = {}
-    for sym in symbols:
+    override = os.getenv("ETF_UNIVERSE", "").strip()
+    universe = (
+        [s.strip().upper() for s in override.split(",") if s.strip()]
+        if override
+        else DEFAULT_ETF_UNIVERSE
+    )
+
+    quotes: list[dict] = []
+    for sym in universe:
         try:
             r = HTTP.get(
-                base, params={"symbol": sym, "token": FINNHUB_KEY}, timeout=HTTP_TIMEOUT
+                f"{FINNHUB}/quote",
+                params={"symbol": sym, "token": FINNHUB_KEY},
+                timeout=HTTP_TIMEOUT,
             )
             r.raise_for_status()
             q = r.json()
-            price = q.get("c")
-            # Finnhub returns c == 0 for unknown/invalid symbols.
-            if not price:
-                log.warning("No quote for %s (got %s)", sym, q)
-                continue
-            out[sym] = {"price": price, "change_pct": q.get("dp")}
+            price, dp = q.get("c"), q.get("dp")
+            if price and dp is not None:
+                quotes.append({"ticker": sym, "price": price, "change_pct": dp})
         except requests.RequestException as e:
-            log.warning("Quote fetch failed for %s: %s", sym, e)
-    return out
+            log.warning("ETF quote failed for %s: %s", sym, e)
+        finally:
+            time.sleep(RATE_SLEEP)  # stay under 60 req/min
+
+    if not quotes:
+        return empty
+    ranked = sorted(quotes, key=lambda r: r["change_pct"], reverse=True)
+    return {"gainers": ranked[:limit], "losers": ranked[-limit:][::-1]}
 
 
-def get_market_news(limit: int = 10) -> list[dict]:
-    """Finnhub general market news -> list of {headline, url}."""
+# --------------------------------------------------------------------------- #
+# News
+# --------------------------------------------------------------------------- #
+def get_market_news(limit: int = 8) -> list[dict]:
     if not FINNHUB_KEY:
         return []
     try:
         r = HTTP.get(
-            "https://finnhub.io/api/v1/news",
+            f"{FINNHUB}/news",
             params={"category": "general", "token": FINNHUB_KEY},
             timeout=HTTP_TIMEOUT,
         )
@@ -118,8 +195,6 @@ def get_market_news(limit: int = 10) -> list[dict]:
 
 
 def get_tech_news(limit: int = 5) -> list[dict]:
-    """NewsAPI tech/market news, or RSS fallback. Returns normalized dicts:
-    {title, url, source}."""
     if NEWSAPI_KEY:
         try:
             r = HTTP.get(
@@ -145,18 +220,15 @@ def get_tech_news(limit: int = 5) -> list[dict]:
             ]
         except requests.RequestException as e:
             log.warning("NewsAPI failed (%s); falling back to RSS", e)
-
     return _get_rss_news(limit)
 
 
 def _get_rss_news(limit: int) -> list[dict]:
-    """Keyless fallback: pull headlines from free finance RSS feeds."""
     try:
-        import feedparser  # imported lazily so it's only needed for fallback
+        import feedparser
     except Exception:
-        log.warning("feedparser not installed; no RSS fallback available")
+        log.warning("feedparser not installed; no RSS fallback")
         return []
-
     out: list[dict] = []
     for url in RSS_FEEDS:
         try:
@@ -170,31 +242,46 @@ def _get_rss_news(limit: int) -> list[dict]:
                         "source": source,
                     }
                 )
-        except Exception as e:  # feedparser is tolerant; guard anyway
+        except Exception as e:
             log.warning("RSS fetch failed for %s: %s", url, e)
     return out[:limit]
 
 
-def format_digest(market: dict, news: list[dict], tech: list[dict]) -> str:
-    """Build the Markdown digest from collected data."""
+# --------------------------------------------------------------------------- #
+# Formatting
+# --------------------------------------------------------------------------- #
+def _fmt(v, nd=2):
+    return f"{v:.{nd}f}" if isinstance(v, (int, float)) else "n/a"
+
+
+def _movers_table(rows: list[dict], with_volume: bool) -> str:
+    if not rows:
+        return "_No data available._\n"
+    if with_volume:
+        md = "| # | Ticker | Price | Change % | Volume |\n|---|--------|-------|----------|--------|\n"
+        for i, r in enumerate(rows, 1):
+            md += f"| {i} | **{r['ticker']}** | {_fmt(r['price'])} | {_fmt(r['change_pct'])}% | {r.get('volume','n/a')} |\n"
+    else:
+        md = "| # | Ticker | Price | Change % |\n|---|--------|-------|----------|\n"
+        for i, r in enumerate(rows, 1):
+            md += f"| {i} | **{r['ticker']}** | {_fmt(r['price'])} | {_fmt(r['change_pct'])}% |\n"
+    return md
+
+
+def format_digest(stocks, etfs, news, tech) -> str:
     now = datetime.now(timezone.utc)
     md = f"# Market Digest – {now.strftime('%Y-%m-%d')}\n\n"
     md += f"_Generated {now.strftime('%Y-%m-%d %H:%M UTC')}_\n\n"
 
-    md += "## Spot Prices\n"
-    if market:
-        for sym, q in market.items():
-            change = q.get("change_pct")
-            change_str = f"{change:+.2f}%" if isinstance(change, (int, float)) else "n/a"
-            md += f"- **{sym}**: ${q['price']:.2f} ({change_str})\n"
-    else:
-        md += "_No quote data available._\n"
+    md += "## 📈 Top 10 Stock Gainers\n" + _movers_table(stocks["gainers"], True)
+    md += "\n## 📉 Top 10 Stock Losers\n" + _movers_table(stocks["losers"], True)
+    md += "\n## 🧺 Top 10 ETF Gainers\n" + _movers_table(etfs["gainers"], False)
+    md += "\n## 🧺 Top 10 ETF Losers\n" + _movers_table(etfs["losers"], False)
 
-    md += "\n## Market News\n"
+    md += "\n## Market Headlines\n"
     if news:
-        for a in news[:5]:
-            title = a.get("headline") or a.get("title") or "(untitled)"
-            md += f"- [{title}]({a.get('url', '')})\n"
+        for a in news[:8]:
+            md += f"- [{a.get('headline','(untitled)')}]({a.get('url','')})\n"
     else:
         md += "_No market news available._\n"
 
@@ -205,26 +292,27 @@ def format_digest(market: dict, news: list[dict], tech: list[dict]) -> str:
     else:
         md += "_No tech news available._\n"
 
+    md += "\n---\n_Stock movers: Alpha Vantage. ETF movers: Finnhub (curated universe). Research only, not financial advice._\n"
     return md
 
 
 def main() -> None:
-    symbols = _symbols()
-    log.info("Symbols: %s", ", ".join(symbols))
-
-    market = get_market_data(symbols)
+    stocks = get_stock_movers()
+    etfs = get_etf_movers()
     news = get_market_news()
     tech = get_tech_news()
 
-    digest = format_digest(market, news, tech)
+    digest = format_digest(stocks, etfs, news, tech)
     with open("digest.md", "w", encoding="utf-8") as f:
         f.write(digest)
 
     log.info(
-        "Digest written: %d quotes, %d market headlines, %d tech items",
-        len(market),
+        "Digest: %d/%d stock movers, %d/%d ETF movers, %d news",
+        len(stocks["gainers"]),
+        len(stocks["losers"]),
+        len(etfs["gainers"]),
+        len(etfs["losers"]),
         len(news),
-        len(tech),
     )
     print("✓ Digest generated -> digest.md")
 

@@ -5,8 +5,8 @@ on:
     - cron: '0 9 * * 1-5'   # 09:00 UTC, Mon–Fri (skip weekends)
   workflow_dispatch:          # Manual trigger for testing
     inputs:
-      symbols:
-        description: 'Comma-separated tickers (overrides default, e.g. AAPL,MSFT,NVDA)'
+      etf_universe:
+        description: 'Comma-separated ETF tickers to scan instead of the default universe'
         required: false
         default: ''
 
@@ -22,10 +22,10 @@ jobs:
   digest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
@@ -36,8 +36,9 @@ jobs:
       - name: Generate digest
         env:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
           NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
-          SYMBOLS: ${{ github.event.inputs.symbols }}
+          ETF_UNIVERSE: ${{ github.event.inputs.etf_universe }}
         run: python scripts/market_digest.py
 
       # Surface the digest directly in the run summary (no download needed).

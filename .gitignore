@@ -157,6 +157,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Generated digest output (produced by scripts/market_digest.py)
+digest.md
+
 # Spyder project settings
 .spyderproject
 .spyproject

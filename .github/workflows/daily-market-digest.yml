@@ -1,0 +1,53 @@
+name: Daily Market & News Digest
+
+on:
+  schedule:
+    - cron: '0 9 * * 1-5'   # 09:00 UTC, Mon–Fri (skip weekends)
+  workflow_dispatch:          # Manual trigger for testing
+    inputs:
+      symbols:
+        description: 'Comma-separated tickers (overrides default, e.g. AAPL,MSFT,NVDA)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+# Never let two scheduled runs overlap.
+concurrency:
+  group: market-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate digest
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+          SYMBOLS: ${{ github.event.inputs.symbols }}
+        run: python scripts/market_digest.py
+
+      # Surface the digest directly in the run summary (no download needed).
+      - name: Publish to job summary
+        if: always()
+        run: cat digest.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4   # v3 is deprecated/sunset
+        with:
+          name: market-digest-${{ github.run_number }}
+          path: digest.md
+          retention-days: 7

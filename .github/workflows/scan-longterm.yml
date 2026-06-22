@@ -1,0 +1,49 @@
+name: Long-Term Scan (ETFs & Indexes)
+
+on:
+  schedule:
+    - cron: '0 22 * * 1-5'   # 22:00 UTC, Mon–Fri — after US close
+  workflow_dispatch:
+    inputs:
+      etf_universe:
+        description: 'Comma-separated ETF tickers to scan instead of the default'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scan-longterm
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run long-term scan (Finnhub)
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          ETF_UNIVERSE: ${{ github.event.inputs.etf_universe }}
+        run: python scripts/scan_longterm.py
+
+      - name: Commit & push report
+        run: |
+          git config user.name "myendmess"
+          git config user.email "boujnanemohamed23@gmail.com"
+          git add reports/
+          if git diff --staged --quiet; then
+            echo "No new report to commit."
+          else
+            git commit -m "chore: long-term scan $(date -u +%Y-%m-%d)"
+            git push
+          fi

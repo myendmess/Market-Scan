@@ -1,0 +1,49 @@
+name: Short-Term Penny Watchlist
+
+on:
+  schedule:
+    - cron: '0 11 * * 1-5'   # 11:00 UTC, Mon–Fri — pre-open watchlist
+  workflow_dispatch:
+    inputs:
+      penny_max_price:
+        description: 'Price ceiling for penny/small-cap candidates (default 5.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scan-shortterm
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run short-term scan (Alpha Vantage)
+        env:
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+          PENNY_MAX_PRICE: ${{ github.event.inputs.penny_max_price }}
+        run: python scripts/scan_shortterm.py
+
+      - name: Commit & push report
+        run: |
+          git config user.name "myendmess"
+          git config user.email "boujnanemohamed23@gmail.com"
+          git add reports/
+          if git diff --staged --quiet; then
+            echo "No new report to commit."
+          else
+            git commit -m "chore: short-term penny watchlist $(date -u +%Y-%m-%d)"
+            git push
+          fi

@@ -133,6 +133,10 @@ def get_penny_candidates() -> list[dict]:
             chg = _pct(x.get("change_percentage"))
             if not t or t in seen or price is None:
                 continue
+            # Skip warrants/units/rights (Nasdaq 5th-letter W/U/R) and odd
+            # symbols — penny warrants are exactly the junk movers surface.
+            if not (t.isalpha() and len(t) <= 5 and not (len(t) == 5 and t[-1] in ("W", "U", "R"))):
+                continue
             if price <= PENNY_MAX and (chg or 0) > 0:
                 seen.add(t)
                 out.append(

@@ -135,7 +135,15 @@ def _av_candidate_pool() -> list[str]:
     for bucket in ("most_actively_traded", "top_gainers", "top_losers"):
         for item in j.get(bucket, []):
             t = (item.get("ticker") or "").upper()
-            if t and t.isalpha() and len(t) <= 5 and t not in seen:
+            # Skip warrants/units/rights (Nasdaq 5th-letter codes W/U/R) — not
+            # investable common stock for a long-term screen.
+            if (
+                t
+                and t.isalpha()
+                and len(t) <= 5
+                and t not in seen
+                and not (len(t) == 5 and t[-1] in ("W", "U", "R"))
+            ):
                 seen.add(t)
                 pool.append(t)
     return pool
@@ -189,7 +197,10 @@ def analyze(symbol: str) -> dict | None:
     mcap = m.get("marketCapitalization")
     div = m.get("dividendYieldIndicatedAnnual")
 
-    if mcap is not None and mcap < MIN_MARKET_CAP:
+    # Require a real market cap >= floor. A missing cap (None) is typical of
+    # leveraged/inverse ETFs and micro-cap warrants, which have no business in a
+    # long-term, large-cap-oriented value screen — drop them.
+    if mcap is None or mcap < MIN_MARKET_CAP:
         return None
     if not (high and low and high > low):
         return None

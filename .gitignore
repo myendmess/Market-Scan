@@ -219,3 +219,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Local secrets / credentials (belt-and-suspenders; .env already covered above)
+*.pem
+*.key
+secrets.*
+*.local
+.claude/settings.local.json

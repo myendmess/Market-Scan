@@ -1,0 +1,57 @@
+name: Market Map (build + deploy Pages)
+
+on:
+  schedule:
+    - cron: '0 23 * * 1-5'   # 23:00 UTC, Mon–Fri — after US close
+  workflow_dispatch:
+
+# Build commits refreshed data; Pages deploy needs pages + id-token.
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: market-map-pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Build S&P 500 dataset
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}   # optional 52-week fallback
+        run: python mapping/scripts/build_sp500.py
+
+      - name: Commit refreshed data
+        run: |
+          git config user.name "myendmess"
+          git config user.email "boujnanemohamed23@gmail.com"
+          git add mapping/dashboard/data/
+          if git diff --staged --quiet; then
+            echo "No data change to commit."
+          else
+            git commit -m "chore: refresh market map data $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+      # Publish the dashboard folder as the Pages site.
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: mapping/dashboard
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -70,11 +70,16 @@ mapping/
 └─ dashboard/   # the static web app: index.html + JS (ECharts via CDN) + assets
 ```
 
-## Hosting (proposed — pending confirmation)
-GitHub Pages on the Market-Scan repo serving `mapping/dashboard/`, **linked/embedded**
-from the portfolio site (a Projects card / iframe) rather than built into it. Requires
-Market-Scan to be a **public** repo. A dedicated repo is the alternative if the map
-becomes a standalone product.
+## Build & deploy
+- **Builder:** `scripts/build_sp500.py` → writes `dashboard/data/sp500.json`. Runs in CI
+  (Python 3.11). Env: `RATE_SLEEP`, `LIMIT` (cap symbols for testing), `FINNHUB_API_KEY`
+  (optional 52-week fallback). No local Python on the dev box — verify via CI.
+- **Workflow:** `.github/workflows/mapping.yml` (schedule `0 23 * * 1-5` + `workflow_dispatch`)
+  builds the data, commits it, and deploys `dashboard/` to GitHub Pages.
+- **One-time setup:** repo **Settings → Pages → Source = "GitHub Actions"** (the repo is
+  public, so Pages is free). Then the published map serves at `https://myendmess.github.io/Market-Scan/`.
+- **Portfolio integration:** link/embed that URL from the portfolio (a Projects card / iframe),
+  not built into the portfolio repo.
 
 ## Known risk
 US data (v1) is free-tier-friendly. Non-US index constituents + per-stock fundamentals

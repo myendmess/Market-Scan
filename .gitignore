@@ -232,4 +232,8 @@ Desktop.ini
 *.key
 secrets.*
 *.local
+
+# Claude / agent dev tooling — local context, not for the public repo
+CLAUDE.md
+.claude/
 .claude/settings.local.json

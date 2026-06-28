@@ -210,8 +210,10 @@ def main() -> None:
 
     report = build_report(rows)
 
-    os.makedirs("reports", exist_ok=True)
-    fname = f"reports/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}-shortterm.md"
+    today = datetime.now(timezone.utc)
+    out_dir = f"reports/shortterm/{today.strftime('%Y-%m')}"
+    os.makedirs(out_dir, exist_ok=True)
+    fname = f"{out_dir}/{today.strftime('%Y-%m-%d')}-shortterm.md"
     with open(fname, "w", encoding="utf-8") as f:
         f.write(report)
 

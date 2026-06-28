@@ -190,8 +190,10 @@ def main() -> None:
     news = get_market_news()
     report = build_report(indexes, leaders, laggards, news)
 
-    os.makedirs("reports", exist_ok=True)
-    fname = f"reports/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}-longterm.md"
+    today = datetime.now(timezone.utc)
+    out_dir = f"reports/longterm/{today.strftime('%Y-%m')}"
+    os.makedirs(out_dir, exist_ok=True)
+    fname = f"{out_dir}/{today.strftime('%Y-%m-%d')}-longterm.md"
     with open(fname, "w", encoding="utf-8") as f:
         f.write(report)
 

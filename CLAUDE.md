@@ -27,7 +27,13 @@ reports/
 ```
 The scripts compute `today = datetime.now(timezone.utc)` and write into
 `reports/<type>/<YYYY-MM>/`. Goal: accumulate a clean dated archive to build datasets
-from later. (A planned sibling `dashboard/` — finviz-style 52-week heatmap — is not built yet.)
+from later.
+
+## `mapping/` — interactive global market heatmap (separate sub-project)
+A finviz-style heatmap project lives in the sibling `mapping/` folder (its own
+`scripts/`, `data/`, `dashboard/`). v1 = S&P 500; built to scale to a global
+Region→Country→Index hierarchy. See `mapping/README.md` for the full charter, canonical
+lineage, and architecture (batch-built JSON → static web app, no client-side keys).
 
 ## Data sources & limits (all free tier)
 - **Finnhub** — free = **60 req/min**; calls are rate-limited (sleep stays even on failure).

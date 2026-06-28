@@ -1,0 +1,200 @@
+﻿[
+    {
+        "ticker":  "MMM",
+        "name":  "3M",
+        "gics_sector":  "Industrials",
+        "gics_sub_industry":  "Industrial Conglomerates",
+        "market_cap":  85542246477,
+        "price":  167.97,
+        "wk52_low":  139.34,
+        "wk52_high":  177.41,
+        "wk52_position":  0.752
+    },
+    {
+        "ticker":  "AOS",
+        "name":  "A. O. Smith",
+        "gics_sector":  "Industrials",
+        "gics_sub_industry":  "Building Products",
+        "market_cap":  8506782673,
+        "price":  61.13,
+        "wk52_low":  54.16,
+        "wk52_high":  81.865,
+        "wk52_position":  0.252
+    },
+    {
+        "ticker":  "ABT",
+        "name":  "Abbott Laboratories",
+        "gics_sector":  "Health Care",
+        "gics_sub_industry":  "Health Care Equipment",
+        "market_cap":  163939385817,
+        "price":  93.24,
+        "wk52_low":  81.97,
+        "wk52_high":  137.54,
+        "wk52_position":  0.203
+    },
+    {
+        "ticker":  "ABBV",
+        "name":  "AbbVie",
+        "gics_sector":  "Health Care",
+        "gics_sub_industry":  "Biotechnology",
+        "market_cap":  447616961200,
+        "price":  243.14,
+        "wk52_low":  181.73,
+        "wk52_high":  244.81,
+        "wk52_position":  0.974
+    },
+    {
+        "ticker":  "ACN",
+        "name":  "Accenture",
+        "gics_sector":  "Information Technology",
+        "gics_sub_industry":  "IT Consulting \u0026 Other Services",
+        "market_cap":  86095466886,
+        "price":  125.82,
+        "wk52_low":  118.15,
+        "wk52_high":  307.77,
+        "wk52_position":  0.04
+    },
+    {
+        "ticker":  "ADBE",
+        "name":  "Adobe Inc.",
+        "gics_sector":  "Information Technology",
+        "gics_sub_industry":  "Application Software",
+        "market_cap":  80585175000,
+        "price":  193.41,
+        "wk52_low":  190.12,
+        "wk52_high":  392.58,
+        "wk52_position":  0.016
+    },
+    {
+        "ticker":  "AMD",
+        "name":  "Advanced Micro Devices",
+        "gics_sector":  "Information Technology",
+        "gics_sub_industry":  "Semiconductors",
+        "market_cap":  850488681290,
+        "price":  532.57,
+        "wk52_low":  133.5,
+        "wk52_high":  562.9899,
+        "wk52_position":  0.929
+    },
+    {
+        "ticker":  "AES",
+        "name":  "AES Corporation",
+        "gics_sector":  "Utilities",
+        "gics_sub_industry":  "Independent Power Producers \u0026 Energy Traders",
+        "market_cap":  10462023650,
+        "price":  14.66,
+        "wk52_low":  10.02,
+        "wk52_high":  17.65,
+        "wk52_position":  0.608
+    },
+    {
+        "ticker":  "AFL",
+        "name":  "Aflac",
+        "gics_sector":  "Financials",
+        "gics_sub_industry":  "Life \u0026 Health Insurance",
+        "market_cap":  61154536216,
+        "price":  118.23,
+        "wk52_low":  96.95,
+        "wk52_high":  120.27,
+        "wk52_position":  0.913
+    },
+    {
+        "ticker":  "A",
+        "name":  "Agilent Technologies",
+        "gics_sector":  "Health Care",
+        "gics_sub_industry":  "Life Sciences Tools \u0026 Services",
+        "market_cap":  38413568703,
+        "price":  135.51,
+        "wk52_low":  108.35,
+        "wk52_high":  160.27,
+        "wk52_position":  0.523
+    },
+    {
+        "ticker":  "APD",
+        "name":  "Air Products",
+        "gics_sector":  "Materials",
+        "gics_sub_industry":  "Industrial Gases",
+        "market_cap":  61858467764,
+        "price":  279.93,
+        "wk52_low":  229.11,
+        "wk52_high":  307.96,
+        "wk52_position":  0.645
+    },
+    {
+        "ticker":  "ABNB",
+        "name":  "Airbnb",
+        "gics_sector":  "Consumer Discretionary",
+        "gics_sub_industry":  "Hotels, Resorts \u0026 Cruise Lines",
+        "market_cap":  87729728592,
+        "price":  141.88,
+        "wk52_low":  110.81,
+        "wk52_high":  147.27,
+        "wk52_position":  0.852
+    },
+    {
+        "ticker":  "AKAM",
+        "name":  "Akamai Technologies",
+        "gics_sector":  "Information Technology",
+        "gics_sub_industry":  "Internet Services \u0026 Infrastructure",
+        "market_cap":  16470717744,
+        "price":  112.89,
+        "wk52_low":  69.78,
+        "wk52_high":  165.45,
+        "wk52_position":  0.451
+    },
+    {
+        "ticker":  "ALB",
+        "name":  "Albemarle Corporation",
+        "gics_sector":  "Materials",
+        "gics_sub_industry":  "Specialty Chemicals",
+        "market_cap":  15767862839,
+        "price":  141.05,
+        "wk52_low":  60.64,
+        "wk52_high":  221,
+        "wk52_position":  0.501
+    },
+    {
+        "ticker":  "ARE",
+        "name":  "Alexandria Real Estate Equities",
+        "gics_sector":  "Real Estate",
+        "gics_sub_industry":  "Office REITs",
+        "market_cap":  9623160686,
+        "price":  53.29,
+        "wk52_low":  39.41,
+        "wk52_high":  88.236,
+        "wk52_position":  0.284
+    },
+    {
+        "ticker":  "ALGN",
+        "name":  "Align Technology",
+        "gics_sector":  "Health Care",
+        "gics_sub_industry":  "Health Care Supplies",
+        "market_cap":  12778822401,
+        "price":  175.71,
+        "wk52_low":  122,
+        "wk52_high":  208.305,
+        "wk52_position":  0.622
+    },
+    {
+        "ticker":  "ALLE",
+        "name":  "Allegion",
+        "gics_sector":  "Industrials",
+        "gics_sub_industry":  "Building Products",
+        "market_cap":  12006099140,
+        "price":  137,
+        "wk52_low":  125,
+        "wk52_high":  183.11,
+        "wk52_position":  0.207
+    },
+    {
+        "ticker":  "LNT",
+        "name":  "Alliant Energy",
+        "gics_sector":  "Utilities",
+        "gics_sub_industry":  "Electric Utilities",
+        "market_cap":  19951901108,
+        "price":  76.19,
+        "wk52_low":  59.82,
+        "wk52_high":  76.595,
+        "wk52_position":  0.976
+    }
+]

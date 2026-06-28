@@ -9,124 +9,195 @@
   <style>
     :root{
       --bg:#0b0e14; --panel:#11151f; --line:#1e2533; --text:#e6edf3; --muted:#8b97a7;
-      --accent:#fbbf24;
+      --accent:#fbbf24; --up:#37d07a; --down:#ff6b6b;
     }
     *{box-sizing:border-box}
-    html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    html,body{margin:0;height:100vh;background:var(--bg);color:var(--text);
       font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
-    header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;
-      flex-wrap:wrap;align-items:center;gap:14px}
-    h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px}
+    body{display:flex;flex-direction:column}
+    header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;
+      flex-wrap:wrap;align-items:center;gap:12px}
+    h1{font-size:16px;margin:0;font-weight:700}
     h1 span{color:var(--accent)}
-    .crumb{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
-    .crumb b{color:var(--text)}
+    .crumb{font-size:12px;color:var(--muted)}
+    /* search */
+    .search{position:relative;width:230px}
+    .search input{width:100%;background:var(--panel);border:1px solid var(--line);
+      color:var(--text);border-radius:8px;padding:6px 10px;font-size:12px;outline:none}
+    .search input:focus{border-color:var(--accent)}
+    .sdd{position:absolute;top:34px;left:0;right:0;background:var(--panel);
+      border:1px solid var(--line);border-radius:8px;z-index:40;display:none;
+      max-height:280px;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+    .sitem{padding:6px 10px;font-size:12px;cursor:pointer;display:flex;gap:8px}
+    .sitem:hover{background:#1a2030}
+    .sitem b{color:var(--accent)}
+    .sitem span{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .chips{display:flex;flex-wrap:wrap;gap:6px}
     .chip{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);
       color:var(--muted);background:var(--panel);cursor:not-allowed}
-    .chip.active{color:#0b0e14;background:var(--accent);border-color:var(--accent);
-      font-weight:700;cursor:default}
+    .chip.active{color:#0b0e14;background:var(--accent);border-color:var(--accent);font-weight:700;cursor:default}
     .legend{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
-    .bar{width:160px;height:10px;border-radius:6px;
-      background:linear-gradient(90deg,#c83232,#464a54,#1f9b4e)}
-    #map{width:100%;height:calc(100vh - 102px)}
-    #status{padding:8px 18px;font-size:12px;color:var(--muted)}
-    footer{padding:6px 18px;font-size:11px;color:var(--muted);border-top:1px solid var(--line)}
+    .bar{width:150px;height:10px;border-radius:6px;background:linear-gradient(90deg,#c83232,#464a54,#1f9b4e)}
+    #status{padding:6px 16px;font-size:12px;color:var(--muted)}
+    /* contained, framed map */
+    #mapframe{flex:1;min-height:0;margin:0 12px 8px;border:1px solid var(--line);
+      border-radius:10px;overflow:hidden;background:#080b11}
+    #map{width:100%;height:100%}
+    footer{padding:6px 16px;font-size:11px;color:var(--muted);border-top:1px solid var(--line)}
+    /* pop-up */
+    .ov{position:fixed;inset:0;background:rgba(4,7,12,.55);display:none;
+      align-items:center;justify-content:center;z-index:60}
+    .pop{width:440px;max-width:92vw;max-height:82vh;display:flex;flex-direction:column;
+      background:var(--panel);border:1px solid var(--line);border-radius:12px;
+      box-shadow:0 20px 60px rgba(0,0,0,.6);overflow:hidden}
+    .pop-head{padding:14px 16px;border-bottom:1px solid var(--line);position:relative}
+    .pop-x{position:absolute;top:10px;right:12px;background:none;border:none;color:var(--muted);
+      font-size:20px;cursor:pointer;line-height:1}
+    .pop-title{display:flex;align-items:baseline;gap:10px}
+    .pop-tkr{font-size:22px;font-weight:800}
+    .pop-price{font-size:18px}
+    .pop-gain{font-size:16px;font-weight:700;margin-left:auto;margin-right:18px}
+    .pop-sub{font-size:12px;color:var(--muted);margin-top:4px}
+    .pop-meta{font-size:11px;color:var(--muted);margin-top:2px}
+    .pop-peers{overflow:auto}
+    .peer{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;
+      padding:7px 16px;font-size:13px;cursor:pointer;border-top:1px solid #161c28}
+    .peer:hover{background:#1a2030}
+    .peer--on{background:#1c2433}
+    .peer-t{font-weight:700}
+    .peer-p{color:var(--text);font-variant-numeric:tabular-nums}
+    .peer-g{font-weight:600;width:78px;text-align:right;font-variant-numeric:tabular-nums}
   </style>
 </head>
 <body>
   <header>
     <h1>Market <span>Map</span></h1>
-    <div class="crumb">Global Markets <b>›</b> Americas <b>›</b> USA <b>›</b></div>
+    <div class="crumb">Global Markets › Americas › USA ›</div>
+    <div class="search">
+      <input id="sin" type="text" placeholder="Search ticker or company…" autocomplete="off" />
+      <div id="sdd" class="sdd"></div>
+    </div>
     <div class="chips" id="chips"></div>
     <div class="legend"><span>52w low</span><span class="bar"></span><span>52w high</span></div>
   </header>
   <div id="status">Loading…</div>
-  <div id="map"></div>
-  <footer>Size = market cap · Color = position in 52-week range · Free-tier data, research only — not advice.</footer>
+  <div id="mapframe"><div id="map"></div></div>
+  <footer>Size = market cap · color = position in 52-week range · label = % gain from 52-week low · research only — not advice.</footer>
+
+  <div class="ov" id="ov">
+    <div class="pop" id="pop">
+      <div class="pop-head">
+        <button class="pop-x" id="pop-x">×</button>
+        <div class="pop-title"><span class="pop-tkr" id="pop-tkr"></span><span class="pop-price" id="pop-price"></span><span class="pop-gain" id="pop-gain"></span></div>
+        <div class="pop-sub" id="pop-sub"></div>
+        <div class="pop-meta" id="pop-meta"></div>
+      </div>
+      <div class="pop-peers" id="pop-peers"></div>
+    </div>
+  </div>
 
   <script>
-    // ---- global hierarchy (only S&P 500 active in v1) ----
-    const INDEXES = [
-      {id:'sp500', label:'S&P 500', active:true},
-      {id:'dow30', label:'Dow 30'}, {id:'nasdaqcomp', label:'Nasdaq Composite'},
-      {id:'russell2000', label:'Russell 2000'}, {id:'tsx', label:'S&P/TSX'},
-      {id:'stoxx600', label:'STOXX 600'}, {id:'dax', label:'DAX 40'},
-      {id:'nikkei', label:'Nikkei 225'}, {id:'kospi', label:'KOSPI'},
+    const INDEXES=[
+      {id:'sp500',label:'S&P 500',active:true},{id:'dow30',label:'Dow 30'},
+      {id:'nasdaqcomp',label:'Nasdaq Composite'},{id:'russell2000',label:'Russell 2000'},
+      {id:'tsx',label:'S&P/TSX'},{id:'stoxx600',label:'STOXX 600'},{id:'dax',label:'DAX 40'},
+      {id:'nikkei',label:'Nikkei 225'},{id:'kospi',label:'KOSPI'},
     ];
-    const chips = document.getElementById('chips');
-    for (const ix of INDEXES){
-      const el = document.createElement('span');
-      el.className = 'chip' + (ix.active ? ' active' : '');
-      el.textContent = ix.label + (ix.active ? '' : ' · soon');
-      chips.appendChild(el);
-    }
+    const chips=document.getElementById('chips');
+    for(const ix of INDEXES){const el=document.createElement('span');
+      el.className='chip'+(ix.active?' active':'');el.textContent=ix.label+(ix.active?'':' · soon');chips.appendChild(el);}
 
-    // ---- color: 0 (52w low)=red, .5=neutral, 1 (52w high)=green ----
+    let RAW=[], chart=null;
     const lerp=(a,b,t)=>a.map((v,i)=>Math.round(v+(b[i]-v)*t));
-    function colorFor(p){
-      if(p==null) return '#3a4150';
-      const lo=[200,50,50], mid=[70,74,84], hi=[31,155,78];
-      const c = p<0.5 ? lerp(lo,mid,p/0.5) : lerp(mid,hi,(p-0.5)/0.5);
-      return `rgb(${c[0]},${c[1]},${c[2]})`;
-    }
-    const fmtB = v => '$'+(v/1e9).toFixed(v>=1e11?0:1)+'B';
+    function colorFor(p){if(p==null)return '#3a4150';const lo=[200,50,50],mid=[70,74,84],hi=[31,155,78];
+      const c=p<0.5?lerp(lo,mid,p/0.5):lerp(mid,hi,(p-0.5)/0.5);return `rgb(${c[0]},${c[1]},${c[2]})`;}
+    const fmtB=v=>'$'+(v/1e9).toFixed(v>=1e11?0:1)+'B';
+    const gainFromLow=r=>(r.price&&r.wk52_low>0)?(r.price-r.wk52_low)/r.wk52_low*100:null;
+    const pctStr=g=>g==null?'n/a':(g>=0?'+':'')+g.toFixed(2)+'%';
 
     function buildTree(rows){
-      const sectors = {};
-      for(const r of rows){
-        const sec = r.gics_sector || 'Unknown';
-        const ind = r.gics_sub_industry || 'Other';
-        (sectors[sec] = sectors[sec] || {});
-        (sectors[sec][ind] = sectors[sec][ind] || []).push(r);
-      }
-      return Object.entries(sectors).map(([sec,inds])=>({
-        name: sec,
-        children: Object.entries(inds).map(([ind,stocks])=>({
-          name: ind,
-          children: stocks.map(s=>({
-            name: s.ticker, value: s.market_cap,
-            itemStyle:{ color: colorFor(s.wk52_position) }, _raw: s
-          }))
-        }))
-      }));
+      const sectors={};
+      for(const r of rows){const sec=r.gics_sector||'Unknown',ind=r.gics_sub_industry||'Other';
+        (sectors[sec]=sectors[sec]||{});(sectors[sec][ind]=sectors[sec][ind]||[]).push(r);}
+      return Object.entries(sectors).map(([sec,inds])=>({name:sec,
+        children:Object.entries(inds).map(([ind,stocks])=>({name:ind,
+          children:stocks.map(s=>({name:s.ticker,value:s.market_cap,gain:gainFromLow(s),
+            itemStyle:{color:colorFor(s.wk52_position)},_raw:s}))}))}));
+    }
+
+    function openPopup(s){
+      const peers=RAW.filter(r=>r.gics_sub_industry===s.gics_sub_industry).sort((a,b)=>b.market_cap-a.market_cap);
+      document.getElementById('pop-tkr').textContent=s.ticker;
+      document.getElementById('pop-price').textContent=s.price!=null?s.price.toFixed(2):'—';
+      const g=gainFromLow(s),gel=document.getElementById('pop-gain');
+      gel.textContent=pctStr(g);gel.style.color=g>=0?'var(--up)':'var(--down)';
+      document.getElementById('pop-sub').textContent=`${s.name} · ${s.gics_sector} · ${s.gics_sub_industry}`;
+      document.getElementById('pop-meta').textContent=`52w ${s.wk52_low}–${s.wk52_high} · position ${s.wk52_position!=null?(s.wk52_position*100).toFixed(0)+'%':'n/a'} · mcap ${fmtB(s.market_cap)}`;
+      const body=document.getElementById('pop-peers');body.innerHTML='';
+      for(const p of peers){const pg=gainFromLow(p);const row=document.createElement('div');
+        row.className='peer'+(p.ticker===s.ticker?' peer--on':'');
+        row.innerHTML=`<span class="peer-t">${p.ticker}</span><span class="peer-p">${p.price!=null?p.price.toFixed(2):'—'}</span>`+
+          `<span class="peer-g" style="color:${pg>=0?'var(--up)':'var(--down)'}">${pctStr(pg)}</span>`;
+        row.onclick=()=>openPopup(p);body.appendChild(row);}
+      document.getElementById('ov').style.display='flex';
+    }
+    const closePopup=()=>document.getElementById('ov').style.display='none';
+
+    function renderSearch(q){
+      const dd=document.getElementById('sdd');
+      if(!q){dd.style.display='none';dd.innerHTML='';return;}
+      const Q=q.toUpperCase();
+      const m=RAW.filter(r=>r.ticker.toUpperCase().startsWith(Q)||r.name.toUpperCase().includes(Q)).slice(0,8);
+      dd.innerHTML='';if(!m.length){dd.style.display='none';return;}
+      for(const r of m){const it=document.createElement('div');it.className='sitem';
+        it.innerHTML=`<b>${r.ticker}</b><span>${r.name}</span>`;it.onclick=()=>selectStock(r.ticker);dd.appendChild(it);}
+      dd.style.display='block';
+    }
+    function selectStock(tkr){
+      const s=RAW.find(r=>r.ticker===tkr);if(!s)return;
+      document.getElementById('sin').value='';document.getElementById('sdd').style.display='none';
+      if(chart){try{chart.dispatchAction({type:'treemapZoomToNode',seriesIndex:0,targetNode:s.gics_sub_industry});}catch(e){}
+        try{chart.dispatchAction({type:'highlight',seriesIndex:0,name:s.ticker});}catch(e){}}
+      openPopup(s);
     }
 
     fetch('data/sp500.json').then(r=>r.json()).then(rows=>{
-      document.getElementById('status').textContent =
-        `S&P 500 · ${rows.length} names · sized by market cap, colored by 52-week position`;
-      const chart = echarts.init(document.getElementById('map'), null, {renderer:'canvas'});
+      RAW=rows;
+      document.getElementById('status').textContent=`S&P 500 · ${rows.length} names · size = market cap · color = 52-week position · label = % from 52-week low`;
+      chart=echarts.init(document.getElementById('map'),null,{renderer:'canvas'});
       chart.setOption({
         backgroundColor:'transparent',
-        tooltip:{ formatter: info=>{
-          const d = info.data && info.data._raw;
-          if(!d) return `<b>${info.name}</b><br>${fmtB(info.value)}`;
-          const pos = d.wk52_position==null?'n/a':(d.wk52_position*100).toFixed(0)+'%';
-          return `<b>${d.ticker}</b> — ${d.name}<br>`+
-                 `<span style="color:#8b97a7">${d.gics_sector} · ${d.gics_sub_industry}</span><br>`+
-                 `Price $${d.price} &nbsp; MCap ${fmtB(d.market_cap)}<br>`+
-                 `52w ${d.wk52_low}–${d.wk52_high} &nbsp; pos ${pos}`;
-        }},
+        tooltip:{formatter:info=>{const d=info.data&&info.data._raw;if(!d)return `<b>${info.name}</b><br>${fmtB(info.value)}`;
+          return `<b>${d.ticker}</b> — ${d.name}<br><span style="color:#8b97a7">${d.gics_sector} · ${d.gics_sub_industry}</span><br>`+
+            `Price $${d.price} · ${pctStr(gainFromLow(d))} from low<br>MCap ${fmtB(d.market_cap)} · 52w ${d.wk52_low}–${d.wk52_high}`;}},
         series:[{
-          type:'treemap', roam:true, nodeClick:'zoomToNode',
-          width:'100%', height:'100%', top:0, left:0, right:0, bottom:0,
-          data: buildTree(rows),
-          label:{ show:true, formatter:'{b}', color:'#fff', fontSize:11, fontWeight:600 },
-          upperLabel:{ show:true, height:22, color:'#cbd5e1', fontSize:12 },
-          itemStyle:{ borderColor:'#0b0e14', borderWidth:1, gapWidth:1 },
+          type:'treemap',roam:false,nodeClick:'zoomToNode',
+          width:'100%',height:'100%',top:0,left:0,right:0,bottom:0,
+          data:buildTree(rows),
+          label:{show:true,color:'#fff',fontSize:11,fontWeight:600,lineHeight:13,
+            formatter:p=>{const g=p.data&&p.data.gain;
+              return g==null?p.name:`${p.name}\n${g>=0?'+':''}${g.toFixed(0)}%`;}},
+          upperLabel:{show:true,height:20,color:'#cbd5e1',fontSize:11},
+          itemStyle:{borderColor:'#0b0e14',borderWidth:1,gapWidth:1},
           levels:[
-            { itemStyle:{ borderColor:'#0b0e14', borderWidth:6, gapWidth:6 },
-              upperLabel:{ show:true, color:'#fbbf24', fontWeight:700 } },
-            { itemStyle:{ borderColor:'#0b0e14', borderWidth:2, gapWidth:2 } },
-            { itemStyle:{ borderWidth:1, gapWidth:1 } }
+            {itemStyle:{borderColor:'#0b0e14',borderWidth:5,gapWidth:5},upperLabel:{show:true,color:'#fbbf24',fontWeight:700}},
+            {itemStyle:{borderColor:'#0b0e14',borderWidth:2,gapWidth:2}},
+            {itemStyle:{borderWidth:1,gapWidth:1}}
           ],
-          breadcrumb:{ show:true, bottom:4, itemStyle:{color:'#11151f'},
-            textStyle:{color:'#8b97a7'} }
+          breadcrumb:{show:true,bottom:4,itemStyle:{color:'#11151f'},textStyle:{color:'#8b97a7'}}
         }]
       });
-      window.addEventListener('resize', ()=>chart.resize());
-    }).catch(e=>{
-      document.getElementById('status').textContent = 'Failed to load data: '+e;
-    });
+      chart.on('click',p=>{if(p.data&&p.data._raw)openPopup(p.data._raw);});
+      window.addEventListener('resize',()=>chart.resize());
+    }).catch(e=>{document.getElementById('status').textContent='Failed to load data: '+e;});
+
+    document.getElementById('sin').addEventListener('input',e=>renderSearch(e.target.value.trim()));
+    document.getElementById('sin').addEventListener('keydown',e=>{
+      if(e.key==='Enter'){const f=document.querySelector('#sdd .sitem');if(f)f.click();}
+      else if(e.key==='Escape'){document.getElementById('sdd').style.display='none';}});
+    document.getElementById('ov').addEventListener('click',e=>{if(e.target.id==='ov')closePopup();});
+    document.addEventListener('keydown',e=>{if(e.key==='Escape')closePopup();});
+    document.getElementById('pop-x').addEventListener('click',closePopup);
   </script>
 </body>
 </html>

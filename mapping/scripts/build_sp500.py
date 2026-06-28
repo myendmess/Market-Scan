@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""Build the S&P 500 dataset for the market-map heatmap.
+"""Build the S&P 500 dataset for the market-map heatmap (with period performance).
 
 Pipeline (all free tier; sources validated 2026-06-28):
-1. Constituents + GICS sector/sub-industry  -> datahub constituents.csv (1 bulk call)
-2. Market cap + price                        -> NASDAQ screener download (1 bulk call)
-3. 52-week high/low                          -> NASDAQ per-symbol summary (rate-limited),
-                                                with Finnhub /stock/metric as fallback
-                                                (uses FINNHUB_API_KEY if present).
+1. Constituents + GICS sector/sub-industry -> datahub constituents.csv (1 bulk call)
+2. Market cap                              -> NASDAQ screener download   (1 bulk call)
+3. Per-stock daily history (~1 year)       -> NASDAQ /chart (per symbol, rate-limited)
+   From the history we derive: latest price, 52-week close range + position,
+   seven period returns (1D/1W/1M/3M/6M/1Y/MTD), and a downsampled sparkline.
 
 Writes ``mapping/dashboard/data/sp500.json`` — a flat array the web app groups
-Sector -> Sub-Industry -> Stock. Degrades gracefully: a symbol missing market cap is
-skipped; a symbol missing 52-week keeps size but gets a null (grey) position.
+Sector -> Sub-Industry -> Stock. Degrades gracefully: no market cap or no chart -> skip.
 
 Env vars:
-  RATE_SLEEP        seconds between NASDAQ per-symbol calls (default 0.25)
-  FINNHUB_API_KEY   optional; only used as a 52-week fallback
-  LIMIT             cap number of symbols (for testing; default all)
+  RATE_SLEEP   seconds between NASDAQ calls (default 0.25)
+  LIMIT        cap number of symbols (testing; default all)
 
 Output is mechanical market data for visualization — NOT financial advice.
 """
@@ -28,6 +26,7 @@ import json
 import logging
 import os
 import time
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -49,26 +48,22 @@ CONSTITUENTS_URL = (
     "s-and-p-500-companies/main/data/constituents.csv"
 )
 NASDAQ_SCREENER = "https://api.nasdaq.com/api/screener/stocks?tableonly=false&limit=10000&download=true"
-NASDAQ_SUMMARY = "https://api.nasdaq.com/api/quote/{sym}/summary?assetclass=stocks"
-FINNHUB_METRIC = "https://finnhub.io/api/v1/stock/metric"
+NASDAQ_CHART = "https://api.nasdaq.com/api/quote/{sym}/chart"
 
 UA = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 RATE_SLEEP = float(os.getenv("RATE_SLEEP", "0.25"))
-FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
-LIMIT = int(os.getenv("LIMIT", "0"))  # 0 = all
-HTTP_TIMEOUT = 20
+LIMIT = int(os.getenv("LIMIT", "0"))
+HTTP_TIMEOUT = 25
+SPARK_POINTS = 30  # downsampled sparkline length
 
 OUT_PATH = Path(__file__).resolve().parents[1] / "dashboard" / "data" / "sp500.json"
 
 
 def _session() -> requests.Session:
     s = requests.Session()
-    retry = Retry(
-        total=3,
-        backoff_factor=1.0,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset({"GET"}),
-    )
+    retry = Retry(total=3, backoff_factor=1.0,
+                  status_forcelist=(429, 500, 502, 503, 504),
+                  allowed_methods=frozenset({"GET"}))
     s.mount("https://", HTTPAdapter(max_retries=retry))
     return s
 
@@ -76,13 +71,11 @@ def _session() -> requests.Session:
 HTTP = _session()
 
 
-def _money(s: str | None) -> float | None:
-    """'$317.4' / '4,167,977,885,680' -> float; None/'' /'0.00' -> None."""
+def _money(s):
     if not s:
         return None
-    v = s.replace("$", "").replace(",", "").strip()
     try:
-        f = float(v)
+        f = float(str(s).replace("$", "").replace(",", "").strip())
         return f if f > 0 else None
     except ValueError:
         return None
@@ -92,23 +85,17 @@ def _money(s: str | None) -> float | None:
 def get_constituents() -> list[dict]:
     r = HTTP.get(CONSTITUENTS_URL, timeout=HTTP_TIMEOUT)
     r.raise_for_status()
-    rows = list(csv.DictReader(io.StringIO(r.text)))
     out = [
-        {
-            "ticker": row["Symbol"].strip(),
-            "name": row["Security"].strip(),
-            "gics_sector": row.get("GICS Sector", "").strip() or "Unknown",
-            "gics_sub_industry": row.get("GICS Sub-Industry", "").strip() or "Other",
-        }
-        for row in rows
-        if row.get("Symbol")
+        {"ticker": row["Symbol"].strip(), "name": row["Security"].strip(),
+         "gics_sector": (row.get("GICS Sector") or "Unknown").strip() or "Unknown",
+         "gics_sub_industry": (row.get("GICS Sub-Industry") or "Other").strip() or "Other"}
+        for row in csv.DictReader(io.StringIO(r.text)) if row.get("Symbol")
     ]
     log.info("Constituents: %d", len(out))
     return out
 
 
-def get_bulk_quotes() -> dict[str, dict]:
-    """symbol -> {market_cap, price} from the NASDAQ screener (one bulk call)."""
+def get_marketcaps() -> dict[str, float]:
     try:
         r = HTTP.get(NASDAQ_SCREENER, headers=UA, timeout=HTTP_TIMEOUT)
         r.raise_for_status()
@@ -116,60 +103,81 @@ def get_bulk_quotes() -> dict[str, dict]:
     except (requests.RequestException, ValueError) as e:
         log.warning("NASDAQ screener failed: %s", e)
         return {}
-    quotes = {}
+    caps = {}
     for row in rows:
         sym = (row.get("symbol") or "").strip().upper()
-        if sym:
-            quotes[sym] = {
-                "market_cap": _money(row.get("marketCap")),
-                "price": _money(row.get("lastsale")),
-            }
-    log.info("Bulk quotes: %d symbols", len(quotes))
-    return quotes
+        mc = _money(row.get("marketCap"))
+        if sym and mc:
+            caps[sym] = mc
+    log.info("Market caps: %d", len(caps))
+    return caps
 
 
-def nasdaq_52w(symbol: str) -> tuple[float, float] | None:
+def fetch_series(symbol: str):
+    """~1 year of (date, close), ascending. None on failure."""
+    frm = (date.today() - timedelta(days=372)).isoformat()
+    to = date.today().isoformat()
     try:
-        r = HTTP.get(NASDAQ_SUMMARY.format(sym=symbol), headers=UA, timeout=HTTP_TIMEOUT)
+        r = HTTP.get(NASDAQ_CHART.format(sym=symbol), headers=UA,
+                     params={"assetclass": "stocks", "fromdate": frm, "todate": to},
+                     timeout=HTTP_TIMEOUT)
         if r.status_code != 200:
             return None
-        sd = (r.json().get("data") or {}).get("summaryData") or {}
-        raw = (sd.get("FiftTwoWeekHighLow") or {}).get("value")
-        if not raw or "/" not in raw:
-            return None
-        hi, lo = (x.replace("$", "").replace(",", "").strip() for x in raw.split("/", 1))
-        return float(hi), float(lo)
-    except (requests.RequestException, ValueError):
+        chart = (r.json().get("data") or {}).get("chart") or []
+        series = []
+        for pt in chart:
+            x, y = pt.get("x"), pt.get("y")
+            if x is None or y is None:
+                continue
+            series.append((datetime.utcfromtimestamp(x / 1000).date(), float(y)))
+        series.sort(key=lambda t: t[0])
+        return series if len(series) >= 5 else None
+    except (requests.RequestException, ValueError, TypeError):
         return None
     finally:
         time.sleep(RATE_SLEEP)
 
 
-def finnhub_52w(symbol: str) -> tuple[float, float] | None:
-    if not FINNHUB_KEY:
-        return None
-    try:
-        r = HTTP.get(
-            FINNHUB_METRIC,
-            params={"symbol": symbol, "metric": "all", "token": FINNHUB_KEY},
-            timeout=HTTP_TIMEOUT,
-        )
-        r.raise_for_status()
-        m = r.json().get("metric") or {}
-        hi, lo = m.get("52WeekHigh"), m.get("52WeekLow")
-        if hi and lo:
-            return float(hi), float(lo)
-    except (requests.RequestException, ValueError):
-        return None
-    finally:
-        time.sleep(RATE_SLEEP)
-    return None
+def _close_on_or_before(series, target):
+    best = None
+    for d, c in series:
+        if d <= target:
+            best = c
+        else:
+            break
+    return best
 
 
-def position(price, low, high) -> float | None:
-    if not (price and low and high and high > low):
-        return None
-    return round(max(0.0, min(1.0, (price - low) / (high - low))), 3)
+def _downsample(closes, n):
+    if len(closes) <= n:
+        return [round(c, 2) for c in closes]
+    step = len(closes) / n
+    out = [round(closes[int(i * step)], 2) for i in range(n)]
+    out.append(round(closes[-1], 2))
+    return out
+
+
+def analyze(series) -> dict:
+    closes = [c for _, c in series]
+    cur, cur_date = closes[-1], series[-1][0]
+    low, high = min(closes), max(closes)
+
+    def ret(days=None, target=None):
+        if target is None:
+            target = cur_date - timedelta(days=days)
+        base = _close_on_or_before(series, target)
+        return round((cur - base) / base * 100, 2) if base and base > 0 else None
+
+    p1d = round((cur - closes[-2]) / closes[-2] * 100, 2) if len(closes) >= 2 and closes[-2] > 0 else None
+    mtd_base = cur_date.replace(day=1) - timedelta(days=1)  # last close of prior month
+    return {
+        "price": round(cur, 2),
+        "wk52_low": round(low, 2), "wk52_high": round(high, 2),
+        "wk52_position": round((cur - low) / (high - low), 3) if high > low else None,
+        "perf": {"1d": p1d, "1w": ret(7), "1m": ret(30), "3m": ret(91),
+                 "6m": ret(182), "1y": ret(365), "mtd": ret(target=mtd_base)},
+        "spark": _downsample(closes, SPARK_POINTS),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -177,43 +185,26 @@ def main() -> None:
     names = get_constituents()
     if LIMIT:
         names = names[:LIMIT]
-    quotes = get_bulk_quotes()
+    caps = get_marketcaps()
 
-    out: list[dict] = []
-    missing_52w = 0
+    out, skipped = [], 0
     for i, c in enumerate(names, 1):
         sym = c["ticker"]
-        q = quotes.get(sym.upper(), {})
-        mcap, price = q.get("market_cap"), q.get("price")
+        mcap = caps.get(sym.upper())
         if not mcap:
-            log.warning("skip %s (no market cap)", sym)
+            skipped += 1
             continue
-
-        hl = nasdaq_52w(sym) or finnhub_52w(sym.replace(".", "."))
-        if hl:
-            high, low = hl
-        else:
-            high = low = None
-            missing_52w += 1
-
-        out.append(
-            {
-                **c,
-                "market_cap": mcap,
-                "price": price,
-                "wk52_low": low,
-                "wk52_high": high,
-                "wk52_position": position(price, low, high),
-            }
-        )
+        series = fetch_series(sym)
+        if not series:
+            skipped += 1
+            continue
+        out.append({**c, "market_cap": mcap, **analyze(series)})
         if i % 50 == 0:
-            log.info("…%d/%d processed", i, len(names))
+            log.info("…%d/%d (kept %d)", i, len(names), len(out))
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUT_PATH.write_text(json.dumps(out, indent=1), encoding="utf-8")
-    log.info(
-        "Wrote %s (%d names, %d without 52-week)", OUT_PATH, len(out), missing_52w
-    )
+    OUT_PATH.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+    log.info("Wrote %s (%d names, %d skipped)", OUT_PATH, len(out), skipped)
     print(f"✓ S&P 500 map data -> {OUT_PATH} ({len(out)} names)")
 
 

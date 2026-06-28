@@ -1,26 +1,22 @@
-name: Market Map (build + deploy Pages)
+name: Market Map (refresh data)
 
 on:
   schedule:
     - cron: '0 23 * * 1-5'   # 23:00 UTC, Mon–Fri — after US close
   workflow_dispatch:
 
-# Build commits refreshed data; Pages deploy needs pages + id-token.
+# Only needs to commit the refreshed dataset; Pages auto-publishes from main
+# (Settings → Pages → Deploy from a branch → main / root).
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
-  group: market-map-pages
+  group: market-map
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
 
@@ -47,11 +43,3 @@ jobs:
             git commit -m "chore: refresh market map data $(date -u +%Y-%m-%d)"
             git push
           fi
-
-      # Publish the dashboard folder as the Pages site.
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: mapping/dashboard
-      - id: deploy
-        uses: actions/deploy-pages@v4

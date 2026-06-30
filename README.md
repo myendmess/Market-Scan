@@ -47,4 +47,4 @@ python scripts/scan_shortterm.py   # -> reports/<date>-shortterm.md
 
 ## Notes
 - Alpha Vantage free tier: 25 requests/day. The short-term scan uses ≤6/run.
-- `.env` is gitignored; `reports/*.md` are committed (your dated history).
+

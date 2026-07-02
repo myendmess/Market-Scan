@@ -89,16 +89,27 @@ def finnhub_get(path: str, **params):
         time.sleep(RATE_SLEEP)  # stay under 60 req/min
 
 
+# Per-run caches: index proxies overlap the ETF universe (and can land in
+# leaders/laggards), so each symbol is fetched at most once per endpoint.
+_quote_cache: dict[str, tuple] = {}
+_metric_cache: dict[str, dict | None] = {}
+
+
 def get_quote(sym: str):
-    q = finnhub_get("/quote", symbol=sym) or {}
-    return q.get("c"), q.get("dp")
+    if sym not in _quote_cache:
+        q = finnhub_get("/quote", symbol=sym) or {}
+        _quote_cache[sym] = (q.get("c"), q.get("dp"))
+    return _quote_cache[sym]
 
 
 def get_52w_position(sym: str, price):
     """Return position in 52-week range (0=low, 1=high), or None."""
-    m = finnhub_get("/stock/metric", symbol=sym, metric="all") or {}
-    md = m.get("metric") if isinstance(m, dict) else None
-    if not isinstance(md, dict):
+    if sym not in _metric_cache:
+        m = finnhub_get("/stock/metric", symbol=sym, metric="all") or {}
+        md = m.get("metric") if isinstance(m, dict) else None
+        _metric_cache[sym] = md if isinstance(md, dict) else None
+    md = _metric_cache[sym]
+    if md is None:
         return None
     hi, lo = md.get("52WeekHigh"), md.get("52WeekLow")
     if not (price and hi and lo and hi > lo):

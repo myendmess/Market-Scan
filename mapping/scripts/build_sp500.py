@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -53,6 +54,9 @@ NASDAQ_CHART = "https://api.nasdaq.com/api/quote/{sym}/chart"
 UA = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 RATE_SLEEP = float(os.getenv("RATE_SLEEP", "0.25"))
 LIMIT = int(os.getenv("LIMIT", "0"))
+# Parallel chart fetches. NASDAQ's limit is undocumented — if a CI run shows
+# mass 429s/blocks, set MAX_WORKERS=1 to fall back to sequential.
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "8"))
 HTTP_TIMEOUT = 25
 SPARK_POINTS = 30  # downsampled sparkline length
 
@@ -64,7 +68,9 @@ def _session() -> requests.Session:
     retry = Retry(total=3, backoff_factor=1.0,
                   status_forcelist=(429, 500, 502, 503, 504),
                   allowed_methods=frozenset({"GET"}))
-    s.mount("https://", HTTPAdapter(max_retries=retry))
+    # pool_maxsize must cover the worker count or threads serialize on sockets.
+    s.mount("https://", HTTPAdapter(max_retries=retry,
+                                    pool_maxsize=max(10, MAX_WORKERS)))
     return s
 
 
@@ -149,12 +155,11 @@ def _close_on_or_before(series, target):
 
 
 def _downsample(closes, n):
+    """Exactly n evenly spaced points, always including first and last close."""
     if len(closes) <= n:
         return [round(c, 2) for c in closes]
-    step = len(closes) / n
-    out = [round(closes[int(i * step)], 2) for i in range(n)]
-    out.append(round(closes[-1], 2))
-    return out
+    step = (len(closes) - 1) / (n - 1)
+    return [round(closes[round(i * step)], 2) for i in range(n)]
 
 
 def analyze(series) -> dict:
@@ -187,20 +192,22 @@ def main() -> None:
         names = names[:LIMIT]
     caps = get_marketcaps()
 
-    out, skipped = [], 0
-    for i, c in enumerate(names, 1):
-        sym = c["ticker"]
-        mcap = caps.get(sym.upper())
-        if not mcap:
-            skipped += 1
-            continue
-        series = fetch_series(sym)
-        if not series:
-            skipped += 1
-            continue
-        out.append({**c, "market_cap": mcap, **analyze(series)})
-        if i % 50 == 0:
-            log.info("…%d/%d (kept %d)", i, len(names), len(out))
+    # Split cap-less names out first, then fetch charts in parallel. ex.map
+    # preserves input order, so results zip back to their constituents.
+    kept = [(c, caps.get(c["ticker"].upper())) for c in names]
+    skipped = sum(1 for _, mc in kept if not mc)
+    kept = [(c, mc) for c, mc in kept if mc]
+
+    out = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        series_iter = ex.map(fetch_series, (c["ticker"] for c, _ in kept))
+        for i, ((c, mcap), series) in enumerate(zip(kept, series_iter), 1):
+            if series:
+                out.append({**c, "market_cap": mcap, **analyze(series)})
+            else:
+                skipped += 1
+            if i % 50 == 0:
+                log.info("…%d/%d (kept %d)", i, len(kept), len(out))
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
